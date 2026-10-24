@@ -3,7 +3,27 @@ name = "agent"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
-    "langchain-anthropic>=1.7.6",
-    "langgraph>=1.2.16",
+    "anthropic>=2.2.0",
+    "huggingface-hub==1.31.0",
+    "parakeet-mlx>=0.5.3",
+    "pillow==12.3.0",
     "python-dotenv>=1.2.4",
+    "safetensors==0.8.0",
+    "silero-vad>=6.2.3",
+    "sounddevice>=0.5.6",
+    "torch==2.14.0",
+    "torchvision==0.29.0",
+    "transformers==5.17.0",
 ]
+
+[project.optional-dependencies]
+cuda = [
+    "flash-linear-attention==0.5.2 ; sys_platform == 'linux'",
+]
+gguf = [
+    "llama-cpp-python==0.3.36",
+]
+
+[tool.uv]
+# Keep uv's package cache inside the project so deleting the folder removes everything.
+cache-dir = ".uv-cache"

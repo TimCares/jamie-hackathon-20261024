@@ -1,4 +1,4 @@
-"""Minimal LangGraph agent loop: LLM -> (tool calls -> LLM)* -> answer.
+"""Minimal agent loop: call the model, run any tools it asks for, repeat.
 
 Run:  uv run agent.py "What is 12 * 7?"
 Needs ANTHROPIC_API_KEY in the environment or in a .env file.
@@ -6,50 +6,69 @@ Needs ANTHROPIC_API_KEY in the environment or in a .env file.
 
 import sys
 
+import anthropic
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
-from langchain_core.tools import tool
-from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import ToolNode
 
 load_dotenv()
 
 MODEL = "claude-sonnet-5-5"
 
-
-@tool
-def multiply(a: float, b: float) -> float:
-    """Multiply two numbers."""
-    return a * b
+client = anthropic.Anthropic()
 
 
-TOOLS = [multiply]
+# --- Tools: add your own here (schema + a function in TOOL_FUNCS) -------------
+TOOLS = [
+    {
+        "name": "multiply",
+        "description": "Multiply two numbers.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+            "required": ["a", "b"],
+        },
+    }
+]
+
+TOOL_FUNCS = {
+    "multiply": lambda a, b: a * b,
+}
 
 
-llm = ChatAnthropic(model=MODEL).bind_tools(TOOLS)
+# --- The loop -----------------------------------------------------------------
+def run_agent(question: str) -> str:
+    messages = [{"role": "user", "content": question}]
 
+    while True:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=16000,
+            tools=TOOLS,
+            messages=messages,
+        )
+        messages.append({"role": "assistant", "content": response.content})
 
-def call_model(state: MessagesState) -> dict:
-    return {"messages": [llm.invoke(state["messages"])]}
+        if response.stop_reason != "tool_use":
+            return "".join(b.text for b in response.content if b.type == "text")
 
-
-def route(state: MessagesState) -> str:
-    """Loop to the tools node while the model keeps requesting tool calls."""
-    return "tools" if state["messages"][-1].tool_calls else END
-
-
-builder = StateGraph(MessagesState)
-builder.add_node("model", call_model)
-builder.add_node("tools", ToolNode(TOOLS))
-builder.add_edge(START, "model")
-builder.add_conditional_edges("model", route, ["tools", END])
-builder.add_edge("tools", "model")
-
-graph = builder.compile()
+        results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            print(f"[tool] {block.name}({block.input})")
+            try:
+                output, is_error = str(TOOL_FUNCS[block.name](**block.input)), False
+            except Exception as e:
+                output, is_error = f"{type(e).__name__}: {e}", True
+            results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": output,
+                    "is_error": is_error,
+                }
+            )
+        messages.append({"role": "user", "content": results})
 
 
 if __name__ == "__main__":
-    question = " ".join(sys.argv[1:]) or "What is 12 * 7?"
-    result = graph.invoke({"messages": [("user", question)]})
-    for message in result["messages"]:
-        message.pretty_print()
+    print(run_agent(" ".join(sys.argv[1:]) or "What is 12 * 7?"))

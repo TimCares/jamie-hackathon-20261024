@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "live-view",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--directory",
+        "python",
+        "python",
+        "-m",
+        "voice.live_view",
+        "sample/user_service.py",
+        "--port",
+        "8765"
+      ],
+      "port": 8765
+    }
+  ]
+}
