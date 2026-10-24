@@ -2,12 +2,8 @@
 
 Claude Opus 5.5 in fast mode at low effort, with the file prompt-cached. Edits come back through a strict tool
 because the cache warm-up (max_tokens=0) can't be combined with structured output.
-
-uv run python -m voice.coder path/to/file "rename get user to fetch user" [--apply]
 """
 
-import argparse
-import asyncio
 import difflib
 import os
 import subprocess
@@ -59,7 +55,6 @@ class CoderResult:
     summary: str  # from the diff, e.g. "+3 -1 lines"
     edits: list[dict]
     diff: str  # git-style diff; "" when nothing changed
-    before: str
     after: str
     seconds: float
     usage: dict = field(default_factory=dict)
@@ -75,10 +70,6 @@ class Coder:
         self.client = anthropic.AsyncAnthropic()
         # No retries in fast mode: on a rate limit or error, switch to standard speed instead of backing off.
         self._fast_client = self.client.with_options(max_retries=0)
-
-    async def code(self, task: str) -> CoderResult:
-        """Edit for `task` against the file on disk (not written; see apply)."""
-        return await self.edit(self.path.read_text(), task)
 
     async def edit(
         self, content: str, task: str, previous: str | None = None, earlier: str | None = None
@@ -120,7 +111,6 @@ class Coder:
             summary=describe(content, after),
             edits=call.input["edits"],
             diff=git_diff(self.diff_path, content, after),
-            before=content,
             after=after,
             seconds=time.perf_counter() - t,
             usage={
@@ -137,12 +127,6 @@ class Coder:
         placeholder = {"type": "text", "text": "warm up"}  # after the cache breakpoint
         messages = [{"role": "user", "content": [self._file_block(content), placeholder]}]
         await self._request(messages, max_tokens=0, fallback=False)
-
-    def apply(self, result: CoderResult) -> None:
-        """Write the result to the file, unless the file changed since."""
-        if self.path.read_text() != result.before:
-            raise CoderError(f"{self.path} changed since the edit was made")
-        self.path.write_text(result.after)
 
     def _file_block(self, content: str) -> dict:
         return {
@@ -237,23 +221,3 @@ def git_diff(path: str, before: str, after: str) -> str:
         if not line.endswith("\n"):  # last line without a trailing newline
             lines.append("\n\\ No newline at end of file\n")
     return f"diff --git a/{path} b/{path}\n" + "".join(lines)
-
-
-async def main():
-    parser = argparse.ArgumentParser(description="Turn a spoken coding task into a git diff for one file.")
-    parser.add_argument("path")
-    parser.add_argument("task")
-    parser.add_argument("--apply", action="store_true", help="write the change to the file")
-    args = parser.parse_args()
-
-    coder = Coder(args.path)
-    result = await coder.code(args.task)
-    print(result.diff or "(no changes)")
-    print(f"# {result.summary}, {result.seconds:.2f}s, {result.usage}")
-    if args.apply and result.diff:
-        coder.apply(result)
-        print(f"# applied to {args.path}")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
