@@ -29,6 +29,7 @@ def show_diff(diff: str) -> None:
 async def main(path: str):
     stt = ParakeetTranscriber(device="cpu")  # the GPU is for the decider
     decider = TaskDecider()
+    decider.on_finished = stt.set_text_hint  # the decider's "finished?" helps end sentences
     writer = FileWriter(Coder(path))
 
     async def forward_speech():

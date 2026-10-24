@@ -87,6 +87,7 @@ class TaskDecider:
         self.tasks: dict[int, Task] = {}
         self.pending: list[str] = []  # final utterances not consumed yet
         self.interim = ""  # the utterance still being spoken
+        self.on_finished = None  # optional callback(interim text, P(finished)) after each decision on it
 
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="decider")
         self._decider = None
@@ -130,7 +131,10 @@ class TaskDecider:
                     self.pending.clear()
                 continue
 
+            interim = self.interim
             decision = await loop.run_in_executor(self._executor, self._decide, text, self.recent())
+            if interim and self.on_finished:
+                self.on_finished(interim, decision.finished)
             self._held = None
             if decision.choice == "cancel" and self.interim:
                 # Undo only on a finished sentence ("okay no, remove it from here and..." is an update).
